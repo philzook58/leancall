@@ -26,7 +26,8 @@ jobs:
         run: |
           uv run install-lean
           source ~/.profile
-
+          source $HOME/.elan/env
+          elan show
 
       - name: Run tests
         run: uv run pytest

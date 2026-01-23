@@ -10,6 +10,20 @@ Lean is installed via `lean-interact`:
 uv run install-lean
 ```
 
+## Install from GitHub
+
+Using pip:
+
+```bash
+python -m pip install "codylib @ git+ssh://git@github.com/philzook58/codylib.git"
+```
+
+Using uv pip:
+
+```bash
+uv pip install "codylib @ git+ssh://git@github.com/philzook58/codylib.git"
+```
+
 ## Usage
 
 Define Lean code inline and call it:
