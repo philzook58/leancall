@@ -25,9 +25,8 @@ jobs:
       - name: Install Lean
         run: |
           uv run install-lean
-          source ~/.profile
-          source $HOME/.elan/env
-          elan run stable lake
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          lake --version
 
       - name: Run tests
         run: uv run pytest
