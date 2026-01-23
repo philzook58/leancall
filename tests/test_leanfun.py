@@ -6,7 +6,14 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from codylib.leanfun import LeanModule, from_file, from_lean, from_string, to_lean
+from codylib.leanfun import (
+    LeanModule,
+    from_file,
+    from_lean,
+    from_string,
+    register_from_lean,
+    to_lean,
+)
 
 
 def test_to_lean_string_escape():
@@ -19,7 +26,10 @@ def test_lean_num_string():
     assert to_lean(1.25) == "1.25"
     assert to_lean(True) == "true"
     assert to_lean("lean") == '"lean"'
-    assert to_lean({"a": 1, "b": [2, 3]}) == '{"a": 1, "b": [2, 3]}'
+    assert (
+        to_lean({"a": 1, "b": [2, 3]})
+        == 'Lean.Json.mkObj [("a", (1 : Lean.Json)), ("b", Lean.Json.arr #[(2 : Lean.Json), (3 : Lean.Json)])]'
+    )
 
 
 def test_to_lean_dataclass():
@@ -50,6 +60,42 @@ def test_from_lean_primitives():
     assert from_lean('{"x": {"y": 2}}', "Lean.Json") == {"x": {"y": 2}}
     assert from_lean("1.5", "Float") == 1.5
     assert from_lean("()", "Unit") == ()
+
+
+def test_from_lean_registry():
+    @register_from_lean("MyType")
+    def _(value: str, typ: str) -> object:
+        assert typ == "MyType"
+        return f"parsed:{value}"
+
+    assert from_lean("foo", "MyType") == "parsed:foo"
+
+
+def test_leanfun_json_roundtrip():
+    code = "def idJson (x : Json) := x"
+    module = from_string(code)
+    payload = {"a": 1, "b": [2, 3]}
+    assert module.idJson(payload) == payload
+
+
+def test_leanfun_dataclass_argument():
+    from dataclasses import dataclass
+
+    @dataclass
+    class Point:
+        x: int
+        y: int
+
+    code = "\n".join(
+        [
+            "structure Point where",
+            "  x : Nat",
+            "  y : Nat",
+            "def sumPoint (p : Point) := p.x + p.y",
+        ]
+    )
+    module = from_string(code)
+    assert module.sumPoint(Point(x=2, y=5)) == 7
 
 
 def test_from_lean_list_tuple_option():

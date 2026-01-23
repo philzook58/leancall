@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["lark>=1.3.1", "lean-interact>=0.10.5"]
+dependencies = ["lean-interact>=0.10.5"]
 
 
 [tool.hatchling.build]
@@ -16,6 +16,4 @@ packages = ["src/codylib"]
 
 [dependency-groups]
 dev = ["hypothesis>=6.150.2", "numpy>=1.26", "pytest>=9.0.2"]
-extra = [
-    "numpy>=2.4.1",
-]
+extra = ["numpy>=2.4.1"]

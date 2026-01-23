@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
+from decimal import Decimal
+from typing import Callable
 from functools import singledispatch
 import json
 import re
@@ -14,6 +16,16 @@ _DEFAULT_CONFIG = LeanREPLConfig(
     verbose=True, build_repl=True
 )  # download and build Lean REPL
 _SERVER: LeanServer | None = None
+FromLeanHandler = Callable[[str, str], object]
+_FROM_LEAN_REGISTRY: dict[str, FromLeanHandler] = {}
+
+
+def register_from_lean(type_name: str):
+    def decorator(func):
+        _FROM_LEAN_REGISTRY[type_name] = func
+        return func
+
+    return decorator
 
 
 def get_server(config: LeanREPLConfig | None = None) -> LeanServer:
@@ -72,7 +84,49 @@ def _(x: None) -> str:
 
 @to_lean.register(dict)
 def _(x: dict) -> str:
-    return json.dumps(x)
+    return _to_lean_json(x)
+
+
+def _float_to_json_number(value: float) -> tuple[int, int]:
+    dec = Decimal(str(value)).normalize()
+    sign, digits, exp = dec.as_tuple()
+    if not isinstance(exp, int):
+        raise ValueError("Non-finite float for Json encoding")
+    if not digits:
+        return 0, 0
+    mantissa = int("".join(str(d) for d in digits))
+    if sign:
+        mantissa = -mantissa
+    if exp >= 0:
+        mantissa *= 10**exp
+        exponent = 0
+    else:
+        exponent = -exp
+    return mantissa, exponent
+
+
+def _to_lean_json(value: object) -> str:
+    if value is None:
+        return "Lean.Json.null"
+    if isinstance(value, bool):
+        return f"Lean.Json.bool {to_lean(value)}"
+    if isinstance(value, int):
+        return f"({value} : Lean.Json)"
+    if isinstance(value, float):
+        mantissa, exponent = _float_to_json_number(value)
+        return f"Lean.Json.num (JsonNumber.mk {mantissa} {exponent})"
+    if isinstance(value, str):
+        return f"Lean.Json.str {to_lean(value)}"
+    if isinstance(value, list):
+        elems = ", ".join(_to_lean_json(elem) for elem in value)
+        return f"Lean.Json.arr #[{elems}]"
+    if isinstance(value, dict):
+        items = ", ".join(
+            f"({to_lean(str(key))}, {_to_lean_json(val)})"
+            for key, val in value.items()
+        )
+        return f"Lean.Json.mkObj [{items}]"
+    raise Exception(f"Cannot convert {value} to Lean.Json")
 
 
 def _split_top_level(text: str, sep: str = ",") -> list[str]:
@@ -155,6 +209,8 @@ def _strip_outer_parens(text: str) -> str:
 def from_lean(x: str, typ: str) -> object:
     x = x.strip()
     typ = _strip_outer_parens(typ)
+    if typ in _FROM_LEAN_REGISTRY:
+        return _FROM_LEAN_REGISTRY[typ](x, typ)
     if typ in {"Nat", "Int"}:
         value = int(x)
         if typ == "Nat" and value < 0:
@@ -278,7 +334,8 @@ def from_string(
     server: LeanServer | None = None,
 ) -> LeanModule:
     server_obj = server if server is not None else get_server()
-    res = server_obj.run(Command(cmd=code, env=env))
+    full_code = "import Lean\n" + code
+    res = server_obj.run(Command(cmd=full_code, env=env))
     _raise_on_errors(res)
     if isinstance(res, LeanError):
         raise ValueError(res.message)
