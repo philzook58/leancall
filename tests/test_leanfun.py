@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from codylib.leanfun import LeanFun, from_lean, to_lean
+from codylib.leanfun import LeanModule, from_file, from_lean, from_string, to_lean
 
 
 def test_to_lean_string_escape():
@@ -19,6 +19,26 @@ def test_lean_num_string():
     assert to_lean(1.25) == "1.25"
     assert to_lean(True) == "true"
     assert to_lean("lean") == '"lean"'
+    assert to_lean({"a": 1, "b": [2, 3]}) == '{"a": 1, "b": [2, 3]}'
+
+
+def test_to_lean_dataclass():
+    from dataclasses import dataclass
+
+    @dataclass
+    class Point:
+        x: int
+        y: int
+
+    @dataclass
+    class Box:
+        name: str
+        points: list[Point]
+
+    point = Point(x=1, y=2)
+    box = Box(name="box", points=[point, Point(x=3, y=4)])
+    assert to_lean(point) == "{x := 1, y := 2}"
+    assert to_lean(box) == '{name := "box", points := [{x := 1, y := 2}, {x := 3, y := 4}]}'
 
 
 def test_from_lean_primitives():
@@ -26,6 +46,8 @@ def test_from_lean_primitives():
     assert from_lean("-3", "Int") == -3
     assert from_lean("true", "Bool") is True
     assert from_lean('"hi"', "String") == "hi"
+    assert from_lean('{"a": 1, "b": [2, 3]}', "Json") == {"a": 1, "b": [2, 3]}
+    assert from_lean('{"x": {"y": 2}}', "Lean.Json") == {"x": {"y": 2}}
     assert from_lean("1.5", "Float") == 1.5
     assert from_lean("()", "Unit") == ()
 
@@ -60,30 +82,29 @@ def test_from_lean_nested_structures():
 
 def test_leanfun_from_string_and_call():
     code = "def addFromString (x : Int) := x + 1"
-    func = LeanFun.from_string(code)
-    assert isinstance(func, LeanFun)
-    assert func(1) == 2
+    module = from_string(code)
+    assert isinstance(module, LeanModule)
+    assert module.addFromString(1) == 2
 
 
 def test_leanfun_from_num():
     code = 'def addFromNum (x : Nat) : Nat × (String × (Option (Option Nat))) := (x + 1, ("hello", some (some 42)))'
-    func = LeanFun.from_string(code)
-    assert isinstance(func, LeanFun)
-    assert func(1) == (2, "hello", 42)
+    module = from_string(code)
+    assert isinstance(module, LeanModule)
+    assert module.addFromNum(1) == (2, "hello", 42)
 
 
 def test_leanfun_missing_definition_raises():
     code = "def fooMissing : Int := 1"
     with pytest.raises(ValueError, match="Missing definitions"):
-        LeanFun.from_string(code, names=["barMissing"])
+        from_string(code, names=["barMissing"])
 
 
 def test_leanfun_kwargs_rejected():
-    code = "def idKwargs (x : Int) := x"
-    func = LeanFun.from_string(code)
-    assert isinstance(func, LeanFun)
-    with pytest.raises(ValueError, match="Keyword arguments"):
-        func(x=1)
+    code = "def sum3 (x y z : Nat) := x + y + z"
+    module = from_string(code)
+    assert isinstance(module, LeanModule)
+    assert module.sum3(1, z=8, y=3) == 12
 
 
 def test_to_lean_numpy_scalars():
@@ -117,40 +138,39 @@ def lean_id_functions():
         "idPairNat",
         "idFloat",
     ]
-    funcs = LeanFun.from_file(str(fixture), names=names)
-    assert isinstance(funcs, list)
-    assert all(isinstance(func, LeanFun) for func in funcs)
-    return dict(zip(names, funcs))
+    module = from_file(str(fixture), names=names)
+    assert isinstance(module, LeanModule)
+    return module
 
 
 @settings(max_examples=10, deadline=None)
 @given(st.integers(min_value=0, max_value=10_000))
 def test_roundtrip_nat(lean_id_functions, x: int):
-    assert lean_id_functions["idNat"](x) == x
+    assert lean_id_functions.idNat(x) == x
 
 
 @settings(max_examples=10, deadline=None)
 @given(st.integers(min_value=-10_000, max_value=10_000))
 def test_roundtrip_int(lean_id_functions, x: int):
-    assert lean_id_functions["idInt"](x) == x
+    assert lean_id_functions.idInt(x) == x
 
 
 @settings(max_examples=10, deadline=None)
 @given(st.booleans())
 def test_roundtrip_bool(lean_id_functions, x: bool):
-    assert lean_id_functions["idBool"](x) is x
+    assert lean_id_functions.idBool(x) is x
 
 
 @settings(max_examples=10, deadline=None)
 @given(st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=126)))
 def test_roundtrip_string(lean_id_functions, x: str):
-    assert lean_id_functions["idString"](x) == x
+    assert lean_id_functions.idString(x) == x
 
 
 @settings(max_examples=10, deadline=None)
 @given(st.lists(st.integers(min_value=-1000, max_value=1000), max_size=10))
 def test_roundtrip_list_int(lean_id_functions, x: list[int]):
-    assert lean_id_functions["idListInt"](x) == x
+    assert lean_id_functions.idListInt(x) == x
 
 
 @settings(max_examples=10, deadline=None)
@@ -161,10 +181,10 @@ def test_roundtrip_list_int(lean_id_functions, x: list[int]):
     )
 )
 def test_roundtrip_pair_nat(lean_id_functions, x: tuple[int, int]):
-    assert lean_id_functions["idPairNat"](x) == x
+    assert lean_id_functions.idPairNat(x) == x
 
 
 @settings(max_examples=10, deadline=None)
 @given(st.floats(allow_nan=False, allow_infinity=False, width=32))
 def test_roundtrip_float(lean_id_functions, x: float):
-    assert lean_id_functions["idFloat"](x) == pytest.approx(x, rel=1e-6, abs=1e-6)
+    assert lean_id_functions.idFloat(x) == pytest.approx(x, rel=1e-6, abs=1e-6)

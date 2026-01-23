@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from functools import singledispatch
 import json
 import re
 from pathlib import Path
 
-from lean_interact import LeanREPLConfig, LeanServer, Command
+from lean_interact import LeanREPLConfig, LeanServer, Command, FileCommand
 from lean_interact.interface import CommandResponse, LeanError
 
 
@@ -25,6 +25,11 @@ def get_server(config: LeanREPLConfig | None = None) -> LeanServer:
 
 @singledispatch
 def to_lean(x: object) -> str:
+    if is_dataclass(x) and not isinstance(x, type):
+        items = []
+        for field in fields(x):
+            items.append(f"{field.name} := {to_lean(getattr(x, field.name))}")
+        return "{" + ", ".join(items) + "}"
     raise Exception(f"Cannot convert {x} to Lean")
 
 
@@ -63,6 +68,11 @@ def _(x: tuple) -> str:
 @to_lean.register(type(None))
 def _(x: None) -> str:
     return "none"
+
+
+@to_lean.register(dict)
+def _(x: dict) -> str:
+    return json.dumps(x)
 
 
 def _split_top_level(text: str, sep: str = ",") -> list[str]:
@@ -156,6 +166,8 @@ def from_lean(x: str, typ: str) -> object:
         return x == "true"
     if typ == "String":
         return _parse_string(x)
+    if typ in {"Json", "Lean.Json"}:
+        return json.loads(x)
     if typ == "Float":
         return float(x)
     if typ == "Unit":
@@ -223,71 +235,13 @@ class LeanFun:
     server: LeanServer
     code: str | None = None
 
-    @classmethod
-    def from_string(
-        cls,
-        code: str,
-        names: list[str] | None = None,
-        env: int | None = None,
-        server: LeanServer | None = None,
-    ) -> "LeanFun | list[LeanFun]":
-        return cls._from_source(code, names=names, env=env, server=server)
-
-    """
-    Refactor __init__ to be less smart, and have the smarts come from here
-    """
-
-    @classmethod
-    def from_file(
-        cls,
-        filename: str,
-        names: list[str] | None = None,
-        env: int | None = None,
-        server: LeanServer | None = None,
-    ) -> "LeanFun | list[LeanFun]":
-        code = Path(filename).read_text(encoding="utf-8")
-        return cls._from_source(code, names=names, env=env, server=server)
-
-    @classmethod
-    def _from_source(
-        cls,
-        code: str,
-        names: list[str] | None = None,
-        env: int | None = None,
-        server: LeanServer | None = None,
-    ) -> "LeanFun | list[LeanFun]":
-        server_obj = server if server is not None else get_server()
-        res = server_obj.run(Command(cmd=code, env=env))
-        _raise_on_errors(res)
-        if isinstance(res, LeanError):
-            raise ValueError(res.message)
-        env = res.env
-        found = _extract_def_names(code)
-        if names is None:
-            names = found
-        missing = sorted(set(names) - set(found))
-        if missing:
-            raise ValueError(f"Missing definitions: {', '.join(missing)}")
-        if not names:
-            raise ValueError("No Lean definitions found")
-        funcs = [
-            cls(
-                name=name,
-                env=env,
-                res_type=_infer_return_type(server_obj, name, env),
-                server=server_obj,
-                code=code,
-            )
-            for name in names
-        ]
-        return funcs[0] if len(funcs) == 1 else funcs
-
     def __call__(self, *args, **kwargs):
-        if kwargs:
-            raise ValueError("Keyword arguments are not supported")
+        arg_parts = [to_lean(arg) for arg in args]
+        for key, value in kwargs.items():
+            arg_parts.append(f"({key} := {to_lean(value)})")
         res = self.server.run(
             Command(
-                cmd=f"#eval {self.name} " + " ".join(map(to_lean, args)), env=self.env
+                cmd=f"#eval {self.name} " + " ".join(arg_parts), env=self.env
             )
         )
         _raise_on_errors(res)
@@ -299,3 +253,76 @@ class LeanFun:
         if not info_messages:
             raise ValueError("No evaluation result returned")
         return from_lean(info_messages[0].data, self.res_type)
+
+
+@dataclass(frozen=True)
+class LeanModule:
+    functions: dict[str, LeanFun]
+
+    def __getitem__(self, name: str) -> LeanFun:
+        return self.functions[name]
+
+    def __getattr__(self, name: str) -> LeanFun:
+        try:
+            return self.functions[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def keys(self) -> list[str]:
+        return list(self.functions.keys())
+
+def from_string(
+    code: str,
+    names: list[str] | None = None,
+    env: int | None = None,
+    server: LeanServer | None = None,
+) -> LeanModule:
+    server_obj = server if server is not None else get_server()
+    res = server_obj.run(Command(cmd=code, env=env))
+    _raise_on_errors(res)
+    if isinstance(res, LeanError):
+        raise ValueError(res.message)
+    funcs = _build_funcs(code, server=server_obj, names=names, env=res.env)
+    return LeanModule({func.name: func for func in funcs})
+
+
+def from_file(
+    filename: str,
+    names: list[str] | None = None,
+    env: int | None = None,
+    server: LeanServer | None = None,
+) -> LeanModule:
+    server_obj = server if server is not None else get_server()
+    res = server_obj.run(FileCommand(path=filename, env=env))
+    _raise_on_errors(res)
+    if isinstance(res, LeanError):
+        raise ValueError(res.message)
+    code = Path(filename).read_text(encoding="utf-8")
+    funcs = _build_funcs(code, server=server_obj, names=names, env=res.env)
+    return LeanModule({func.name: func for func in funcs})
+
+
+def _build_funcs(
+    code: str,
+    server: LeanServer,
+    names: list[str] | None = None,
+    env: int | None = None,
+) -> list["LeanFun"]:
+    found = _extract_def_names(code)
+    if names is None:
+        names = found
+    missing = sorted(set(names) - set(found))
+    if missing:
+        raise ValueError(f"Missing definitions: {', '.join(missing)}")
+    if not names:
+        raise ValueError("No Lean definitions found")
+    return [
+        LeanFun(
+            name=name,
+            env=env,
+            res_type=_infer_return_type(server, name, env),
+            server=server,
+            code=code,
+        )
+        for name in names
+    ]

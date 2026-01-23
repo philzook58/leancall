@@ -30,24 +30,23 @@ Try it on [colab](https://colab.research.google.com/github/philzook58/codylib/bl
 Define Lean code inline and call it:
 
 ```python
-from codylib import LeanFun
+from codylib import from_string
 
 code = "def add (x y : Int) := x + y"
-add = LeanFun.from_string(code)
+mod = from_string(code)
 
-print(add(2, 3))  # 5
+print(mod.add(2, 3))  # 5
 ```
 
 Load from a `.lean` file:
 
 ```python
-from codylib import LeanFun
+from codylib import from_file
 
-funcs = LeanFun.from_file(
+mod = from_file(
     "tests/fixtures/lean_ids.lean",
     names=["idNat", "idInt", "idBool", "idString"],
 )
-func_map = {func.name: func for func in funcs}
 
-print(func_map["idBool"](False))  # False
+print(mod.idBool(False))  # False
 ```
