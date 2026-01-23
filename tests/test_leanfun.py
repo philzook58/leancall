@@ -1,40 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from pathlib import Path
-
 from codylib.leanfun import LeanFun, from_lean, to_lean
-
-
-@dataclass
-class FakeMessage:
-    severity: str
-    data: str
-
-
-@dataclass
-class FakeResult:
-    messages: list[FakeMessage]
-    env: object
-
-
-class FakeServer:
-    def __init__(self, responses: dict[str, FakeResult]):
-        self.responses = responses
-        self.commands: list[str] = []
-
-    def run(self, command):
-        self.commands.append(command.cmd)
-        return self.responses[command.cmd]
 
 
 def test_to_lean_string_escape():
     assert to_lean('a"b') == '"a\\"b"'
+
+
+def test_lean_num_string():
+    assert to_lean(3) == "3"
+    assert to_lean(-3) == "(-3)"
+    assert to_lean(1.25) == "1.25"
+    assert to_lean(True) == "true"
+    assert to_lean("lean") == '"lean"'
 
 
 def test_from_lean_primitives():
@@ -51,75 +35,79 @@ def test_from_lean_list_tuple_option():
     assert from_lean("(1, 2)", "Nat × Nat") == (1, 2)
     assert from_lean("none", "Option Int") is None
     assert from_lean("some 4", "Option Nat") == 4
+    assert from_lean("some (some 4)", "Option (Option Nat)") == 4
+    assert from_lean("[[], [1, 2], [3]]", "List (List Nat)") == [[], [1, 2], [3]]
+    assert from_lean("(1, (2, 3))", "Nat × (Nat × Nat)") == (1, (2, 3))
+
+
+def test_from_lean_nested_structures():
+    assert from_lean("[[1], [2, 3]]", "List (List Nat)") == [[1], [2, 3]]
+    assert from_lean("((1, 2), (3, 4))", "(Nat × Nat) × (Nat × Nat)") == (
+        (1, 2),
+        (3, 4),
+    )
+    assert (
+        from_lean("some [1, 2]", "Option (List Nat)") == [1, 2]
+    )
+    assert (
+        from_lean("some (1, 2)", "Option (Nat × Nat)") == (1, 2)
+    )
+    assert from_lean("(1, ((2, none), 3))", "Nat × ((Nat × Option Nat) × Nat)") == (
+        1,
+        ((2, None), 3),
+    )
 
 
 def test_leanfun_from_string_and_call():
-    code = "def add (x : Int) := x + 1"
-    responses = {
-        code: FakeResult([], env=0),
-        "#check add": FakeResult([FakeMessage("info", "add : Int -> Int")], env=0),
-        "#eval add 1": FakeResult([FakeMessage("info", "2")], env=0),
-    }
-    server = FakeServer(responses)
-    func = LeanFun.from_string(code, server=server)
+    code = "def addFromString (x : Int) := x + 1"
+    func = LeanFun.from_string(code)
     assert isinstance(func, LeanFun)
     assert func(1) == 2
-    assert server.commands == [code, "#check add", "#eval add 1"]
+
+
+def test_leanfun_from_num():
+    code = 'def addFromNum (x : Nat) : Nat × (String × (Option (Option Nat))) := (x + 1, ("hello", some (some 42)))'
+    func = LeanFun.from_string(code)
+    assert isinstance(func, LeanFun)
+    assert func(1) == (2, "hello", 42)
 
 
 def test_leanfun_missing_definition_raises():
-    code = "def foo : Int := 1"
-    responses = {
-        code: FakeResult([], env=0),
-        "#check foo": FakeResult([FakeMessage("info", "foo : Int")], env=0),
-    }
-    server = FakeServer(responses)
+    code = "def fooMissing : Int := 1"
     with pytest.raises(ValueError, match="Missing definitions"):
-        LeanFun.from_string(code, names=["bar"], server=server)
+        LeanFun.from_string(code, names=["barMissing"])
 
 
 def test_leanfun_kwargs_rejected():
-    code = "def id (x : Int) := x"
-    responses = {
-        code: FakeResult([], env=0),
-        "#check id": FakeResult([FakeMessage("info", "id : Int -> Int")], env=0),
-    }
-    server = FakeServer(responses)
-    func = LeanFun.from_string(code, server=server)
+    code = "def idKwargs (x : Int) := x"
+    func = LeanFun.from_string(code)
     assert isinstance(func, LeanFun)
     with pytest.raises(ValueError, match="Keyword arguments"):
         func(x=1)
 
 
-def test_from_file_roundtrip():
-    fixture = Path(__file__).parent / "fixtures" / "lean_ids.lean"
-    funcs = LeanFun.from_file(
-        str(fixture),
-        names=["idNat", "idInt", "idBool", "idString"],
-    )
-    assert isinstance(funcs, list)
-    assert all(isinstance(func, LeanFun) for func in funcs)
-    typed_funcs = [func for func in funcs if isinstance(func, LeanFun)]
-    func_map = {func.name: func for func in typed_funcs}
-    assert func_map["idNat"](5) == 5
-    assert func_map["idInt"](-7) == -7
-    assert func_map["idBool"](False) is False
-    assert func_map["idString"]("hello") == "hello"
+def test_to_lean_numpy_scalars():
+    np = pytest.importorskip("numpy")
+    import codylib.numpy as cody_numpy
+
+    assert cody_numpy is not None
+    assert to_lean(np.int64(-3)) == "(-3)"
+    assert to_lean(np.float32(1.5)) == "1.5"
+    assert to_lean(np.bool_(True)) == "true"
+
+
+def test_to_lean_numpy_array():
+    np = pytest.importorskip("numpy")
+    import codylib.numpy as cody_numpy
+
+    assert cody_numpy is not None
+    arr = np.array([[1, 2], [3, 4]], dtype=np.int64)
+    assert to_lean(arr) == "[[1, 2], [3, 4]]"
 
 
 @pytest.fixture(scope="module")
 def lean_id_functions():
-    code = "\n".join(
-        [
-            "def idNat (x : Nat) := x",
-            "def idInt (x : Int) := x",
-            "def idBool (x : Bool) := x",
-            "def idString (x : String) := x",
-            "def idListInt (x : List Int) := x",
-            "def idPairNat (x : Nat × Nat) := x",
-            "def idFloat (x : Float) := x",
-        ]
-    )
+    fixture = Path(__file__).parent / "fixtures" / "lean_ids.lean"
     names = [
         "idNat",
         "idInt",
@@ -129,8 +117,9 @@ def lean_id_functions():
         "idPairNat",
         "idFloat",
     ]
-    funcs = LeanFun.from_string(code, names=names)
+    funcs = LeanFun.from_file(str(fixture), names=names)
     assert isinstance(funcs, list)
+    assert all(isinstance(func, LeanFun) for func in funcs)
     return dict(zip(names, funcs))
 
 

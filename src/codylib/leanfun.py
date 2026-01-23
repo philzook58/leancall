@@ -5,25 +5,14 @@ from functools import singledispatch
 import json
 import re
 from pathlib import Path
-from typing import Protocol, cast
 
 from lean_interact import LeanREPLConfig, LeanServer, Command
+from lean_interact.interface import CommandResponse, LeanError
 
 
-class _Message(Protocol):
-    severity: str
-    data: str
-
-
-class _CommandResult(Protocol):
-    messages: list[_Message]
-    env: int | None
-
-
-class _LeanServerLike(Protocol):
-    def run(self, command: Command) -> _CommandResult: ...
-
-_DEFAULT_CONFIG = LeanREPLConfig(verbose=True)  # download and build Lean REPL
+_DEFAULT_CONFIG = LeanREPLConfig(
+    verbose=True, build_repl=True
+)  # download and build Lean REPL
 _SERVER: LeanServer | None = None
 
 
@@ -138,9 +127,24 @@ def _parse_string(text: str) -> str:
         return text.strip('"')
 
 
+def _strip_outer_parens(text: str) -> str:
+    text = text.strip()
+    if not (text.startswith("(") and text.endswith(")")):
+        return text
+    depth = 0
+    for idx, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0 and idx != len(text) - 1:
+                return text
+    return text[1:-1].strip()
+
+
 def from_lean(x: str, typ: str) -> object:
     x = x.strip()
-    typ = typ.strip()
+    typ = _strip_outer_parens(typ)
     if typ in {"Nat", "Int"}:
         value = int(x)
         if typ == "Nat" and value < 0:
@@ -159,12 +163,13 @@ def from_lean(x: str, typ: str) -> object:
             raise ValueError(f"Expected Unit, got {x}")
         return ()
     if typ.startswith("Option "):
-        if x == "none":
+        option_x = _strip_outer_parens(x)
+        if option_x == "none":
             return None
-        if x.startswith("some "):
+        if option_x.startswith("some "):
             inner_typ = typ[len("Option ") :].strip()
-            return from_lean(x[len("some ") :], inner_typ)
-        raise ValueError(f"Expected Option, got {x}")
+            return from_lean(option_x[len("some ") :], inner_typ)
+        raise ValueError(f"Expected Option, got {option_x}")
     if typ.startswith("List "):
         inner_typ = typ[len("List ") :].strip()
         if not (x.startswith("[") and x.endswith("]")):
@@ -189,17 +194,18 @@ def _extract_def_names(code: str) -> list[str]:
     return re.findall(r"^\s*def\s+([A-Za-z0-9_']+)", code, re.MULTILINE)
 
 
-def _raise_on_errors(result: _CommandResult) -> None:
-    messages = getattr(result, "messages", [])
-    for message in messages:
-        if getattr(message, "severity", None) == "error":
+def _raise_on_errors(result: CommandResponse | LeanError) -> None:
+    if isinstance(result, LeanError):
+        raise ValueError(result.message)
+    for message in result.messages:
+        if message.severity == "error":
             raise ValueError(message.data)
 
 
-def _infer_return_type(server: _LeanServerLike, name: str, env: int | None) -> str:
+def _infer_return_type(server: LeanServer, name: str, env: int | None) -> str:
     res = server.run(Command(cmd=f"#check {name}", env=env))
     _raise_on_errors(res)
-    if not res.messages:
+    if isinstance(res, LeanError) or not res.messages:
         raise ValueError(f"No type information for {name}")
     full_type = res.messages[0].data.split(":")[-1].strip()
     if "->" in full_type:
@@ -214,7 +220,7 @@ class LeanFun:
     name: str
     env: int | None
     res_type: str
-    server: _LeanServerLike
+    server: LeanServer
     code: str | None = None
 
     @classmethod
@@ -223,7 +229,7 @@ class LeanFun:
         code: str,
         names: list[str] | None = None,
         env: int | None = None,
-        server: _LeanServerLike | None = None,
+        server: LeanServer | None = None,
     ) -> "LeanFun | list[LeanFun]":
         return cls._from_source(code, names=names, env=env, server=server)
 
@@ -237,7 +243,7 @@ class LeanFun:
         filename: str,
         names: list[str] | None = None,
         env: int | None = None,
-        server: _LeanServerLike | None = None,
+        server: LeanServer | None = None,
     ) -> "LeanFun | list[LeanFun]":
         code = Path(filename).read_text(encoding="utf-8")
         return cls._from_source(code, names=names, env=env, server=server)
@@ -248,11 +254,13 @@ class LeanFun:
         code: str,
         names: list[str] | None = None,
         env: int | None = None,
-        server: _LeanServerLike | None = None,
+        server: LeanServer | None = None,
     ) -> "LeanFun | list[LeanFun]":
-        server_obj = server if server is not None else cast(_LeanServerLike, get_server())
+        server_obj = server if server is not None else get_server()
         res = server_obj.run(Command(cmd=code, env=env))
         _raise_on_errors(res)
+        if isinstance(res, LeanError):
+            raise ValueError(res.message)
         env = res.env
         found = _extract_def_names(code)
         if names is None:
@@ -283,6 +291,8 @@ class LeanFun:
             )
         )
         _raise_on_errors(res)
+        if isinstance(res, LeanError):
+            raise ValueError(res.message)
         info_messages = [
             message for message in res.messages if message.severity == "info"
         ]
