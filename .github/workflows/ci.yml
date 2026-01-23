@@ -24,11 +24,14 @@ jobs:
 
       - name: Install Lean
         run: |
-          install-lean
+          uv run install-lean
+          source ~/.profile
           lake --version
 
       - name: Run tests
-        run: uv run pytest
+        run: |
+          source ~/.profile
+          uv run pytest
 
       - name: Type check
         run: uvx ty check
