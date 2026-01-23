@@ -24,8 +24,7 @@ jobs:
 
       - name: Install Lean
         run: |
-          uv run install-lean
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          install-lean
           lake --version
 
       - name: Run tests
