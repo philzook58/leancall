@@ -26,8 +26,7 @@ uv pip install git+https://github.com/philzook58/codylib.git
 
 ## Usage
 
-Try it on [colab](https://colab.research.google.com/github/philzook58/codylib/example.ipynb)
-
+Try it on [colab](https://colab.research.google.com/github/philzook58/codylib/blob/main/example.ipynb)
 Define Lean code inline and call it:
 
 ```python
