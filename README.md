@@ -4,29 +4,32 @@ Small helpers for calling Lean definitions from Python. Based on [lean-interact]
 
 ## Setup
 
-Lean can be installed via `lean-interact` or by installing elan manually:
+Lean can be installed via `lean-interact`'s installation script:
 
 ```bash
 uv run install-lean
 ```
+
+or by installing elan manually.
 
 ## Install from GitHub
 
 Using pip:
 
 ```bash
-python3 -m pip install git+https://github.com/philzook58/codylib.git
+python3 -m pip install git+https://github.com/philzook58/leancall.git
 ```
 
 Using uv pip:
 
 ```bash
-uv pip install git+https://github.com/philzook58/codylib.git
+uv pip install git+https://github.com/philzook58/leancall.git
 ```
 
 ## Usage
 
-Try it on [colab](https://colab.research.google.com/github/philzook58/codylib/blob/main/example.ipynb)
+Try it on [colab](https://colab.research.google.com/github/philzook58/leancall/blob/main/example.ipynb)
+
 Define Lean code inline and call it:
 
 ```python
