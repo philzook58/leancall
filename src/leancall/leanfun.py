@@ -42,7 +42,9 @@ def to_lean(x: object) -> str:
         for field in fields(x):
             items.append(f"{field.name} := {to_lean(getattr(x, field.name))}")
         return "{" + ", ".join(items) + "}"
-    raise Exception(f"Cannot convert {x} to Lean")
+    raise Exception(
+        f"Cannot convert {x} of type {type(x)} to Lean using `leancall.to_lean`. Maybe you need to import an optional module?"
+    )
 
 
 @to_lean.register
@@ -122,8 +124,7 @@ def _to_lean_json(value: object) -> str:
         return f"Lean.Json.arr #[{elems}]"
     if isinstance(value, dict):
         items = ", ".join(
-            f"({to_lean(str(key))}, {_to_lean_json(val)})"
-            for key, val in value.items()
+            f"({to_lean(str(key))}, {_to_lean_json(val)})" for key, val in value.items()
         )
         return f"Lean.Json.mkObj [{items}]"
     raise Exception(f"Cannot convert {value} to Lean.Json")
@@ -296,9 +297,7 @@ class LeanFun:
         for key, value in kwargs.items():
             arg_parts.append(f"({key} := {to_lean(value)})")
         res = self.server.run(
-            Command(
-                cmd=f"#eval {self.name} " + " ".join(arg_parts), env=self.env
-            )
+            Command(cmd=f"#eval {self.name} " + " ".join(arg_parts), env=self.env)
         )
         _raise_on_errors(res)
         if isinstance(res, LeanError):
@@ -326,6 +325,7 @@ class LeanModule:
 
     def keys(self) -> list[str]:
         return list(self.functions.keys())
+
 
 def from_string(
     code: str,

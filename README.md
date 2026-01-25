@@ -1,4 +1,4 @@
-# codylib
+# leancall
 
 Small helpers for calling Lean definitions from Python. Based on [lean-interact](https://github.com/augustepoiroux/LeanInteract) for core functionality.
 
@@ -30,7 +30,7 @@ Try it on [colab](https://colab.research.google.com/github/philzook58/codylib/bl
 Define Lean code inline and call it:
 
 ```python
-from codylib import from_string
+from leancall import from_string
 
 code = "def add (x y : Int) := x + y"
 mod = from_string(code)
@@ -41,7 +41,7 @@ print(mod.add(2, 3))  # 5
 Load from a `.lean` file:
 
 ```python
-from codylib import from_file
+from leancall import from_file
 
 mod = from_file(
     "tests/fixtures/lean_ids.lean",
@@ -64,4 +64,4 @@ print(mod.idBool(False))  # False
 | `None` | `Option _` | `none` on input; `Option` deserializes to `None`. |
 | `dict` | `Json` / `Lean.Json` | Encoded as Lean JSON constructors. |
 | `dataclass` | record literal | Uses `{field := value}` notation; register `from_lean` to deserialize. |
-| `numpy.ndarray` | `Array` / `List` | Converts via `codylib.numpy` helpers. |
+| `numpy.ndarray` | `Array` / `List` | Converts via `leancall.numpy` helpers. |

@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from codylib.leanfun import (
+from leancall.leanfun import (
     LeanModule,
     from_file,
     from_lean,
@@ -155,7 +155,7 @@ def test_leanfun_kwargs_rejected():
 
 def test_to_lean_numpy_scalars():
     np = pytest.importorskip("numpy")
-    import codylib.numpy as cody_numpy
+    import leancall.numpy as cody_numpy
 
     assert cody_numpy is not None
     assert to_lean(np.int64(-3)) == "(-3)"
@@ -165,7 +165,7 @@ def test_to_lean_numpy_scalars():
 
 def test_to_lean_numpy_array():
     np = pytest.importorskip("numpy")
-    import codylib.numpy as cody_numpy
+    import leancall.numpy as cody_numpy
 
     assert cody_numpy is not None
     arr = np.array([[1, 2], [3, 4]], dtype=np.int64)

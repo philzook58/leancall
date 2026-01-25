@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "codylib"
+name = "leancall"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -12,7 +12,7 @@ dependencies = ["lean-interact>=0.10.5"]
 
 
 [tool.hatchling.build]
-packages = ["src/codylib"]
+packages = ["src/leancall"]
 
 [dependency-groups]
 dev = ["hypothesis>=6.150.2", "numpy>=1.26", "pytest>=9.0.2"]
