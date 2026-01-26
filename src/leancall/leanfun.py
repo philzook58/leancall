@@ -16,11 +16,11 @@ _DEFAULT_CONFIG = LeanREPLConfig(
     verbose=True, build_repl=True
 )  # download and build Lean REPL
 _SERVER: LeanServer | None = None
-FromLeanHandler = Callable[[str, str], object]
+type FromLeanHandler = Callable[[str], object]
 _FROM_LEAN_REGISTRY: dict[str, FromLeanHandler] = {}
 
 
-def register_from_lean(type_name: str):
+def register_from_lean(type_name: str) -> Callable[[FromLeanHandler], FromLeanHandler]:
     def decorator(func):
         _FROM_LEAN_REGISTRY[type_name] = func
         return func
@@ -211,7 +211,7 @@ def from_lean(x: str, typ: str) -> object:
     x = x.strip()
     typ = _strip_outer_parens(typ)
     if typ in _FROM_LEAN_REGISTRY:
-        return _FROM_LEAN_REGISTRY[typ](x, typ)
+        return _FROM_LEAN_REGISTRY[typ](x)
     if typ in {"Nat", "Int"}:
         value = int(x)
         if typ == "Nat" and value < 0:
@@ -260,7 +260,11 @@ def from_lean(x: str, typ: str) -> object:
 
 
 def _extract_def_names(code: str) -> list[str]:
-    return re.findall(r"^\s*def\s+([A-Za-z0-9_']+)", code, re.MULTILINE)
+    return re.findall(
+        r"^\s*(?:(?:unsafe|partial)\s+)*def\s+([A-Za-z0-9_']+)",
+        code,
+        re.MULTILINE,
+    )
 
 
 def _raise_on_errors(result: CommandResponse | LeanError) -> None:

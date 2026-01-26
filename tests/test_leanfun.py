@@ -14,6 +14,7 @@ from leancall.leanfun import (
     register_from_lean,
     to_lean,
 )
+from dataclasses import dataclass, field
 
 
 def test_to_lean_string_escape():
@@ -48,7 +49,10 @@ def test_to_lean_dataclass():
     point = Point(x=1, y=2)
     box = Box(name="box", points=[point, Point(x=3, y=4)])
     assert to_lean(point) == "{x := 1, y := 2}"
-    assert to_lean(box) == '{name := "box", points := [{x := 1, y := 2}, {x := 3, y := 4}]}'
+    assert (
+        to_lean(box)
+        == '{name := "box", points := [{x := 1, y := 2}, {x := 3, y := 4}]}'
+    )
 
 
 def test_from_lean_primitives():
@@ -64,8 +68,7 @@ def test_from_lean_primitives():
 
 def test_from_lean_registry():
     @register_from_lean("MyType")
-    def _(value: str, typ: str) -> object:
-        assert typ == "MyType"
+    def _(value: str) -> object:
         return f"parsed:{value}"
 
     assert from_lean("foo", "MyType") == "parsed:foo"
@@ -114,12 +117,8 @@ def test_from_lean_nested_structures():
         (1, 2),
         (3, 4),
     )
-    assert (
-        from_lean("some [1, 2]", "Option (List Nat)") == [1, 2]
-    )
-    assert (
-        from_lean("some (1, 2)", "Option (Nat × Nat)") == (1, 2)
-    )
+    assert from_lean("some [1, 2]", "Option (List Nat)") == [1, 2]
+    assert from_lean("some (1, 2)", "Option (Nat × Nat)") == (1, 2)
     assert from_lean("(1, ((2, none), 3))", "Nat × ((Nat × Option Nat) × Nat)") == (
         1,
         ((2, None), 3),
@@ -131,6 +130,89 @@ def test_leanfun_from_string_and_call():
     module = from_string(code)
     assert isinstance(module, LeanModule)
     assert module.addFromString(1) == 2
+
+
+def test_leanfun_from_string_partial_unsafe_defs():
+    code = """
+partial def addPartial (x : Nat) := x + 1
+unsafe def addUnsafe (x : Nat) := x + 2
+"""
+    module = from_string(code)
+    assert isinstance(module, LeanModule)
+    assert module.addPartial(1) == 2
+    assert module.addUnsafe(1) == 3
+
+
+def test_app_example():
+    @dataclass(frozen=True)
+    class App:
+        f: str
+        args: list["App"] = field(default_factory=list)
+
+        @classmethod
+        def of_dict(cls, data: dict) -> "App":
+            return App(data["f"], [App.of_dict(a) for a in data["args"]])
+
+    code = """
+import Lean.Data.Json
+structure App where
+    f : String
+    args : List App
+deriving Repr, Inhabited, BEq, Lean.ToJson, Lean.FromJson
+
+def idapp (a : App) : Lean.Json := Lean.toJson a
+
+partial def is_subterm (a b : App) : Bool :=
+  if a == b then
+    true
+  else
+    match a with
+    | App.mk _ args => args.any (fun arg => is_subterm arg b)
+
+partial def app_size (a : App) : Nat :=
+  match a with
+  | App.mk _ args =>
+    1 + args.foldl (fun acc arg => acc + app_size arg) 0
+
+partial def app_symbols (a : App) : List String :=
+  match a with
+  | App.mk f args =>
+    f :: args.foldl (fun acc arg => acc ++ app_symbols arg) []
+
+partial def map_names (a : App) (tag : String) : App :=
+  match a with
+  | App.mk f args =>
+    App.mk (tag ++ f) (args.map (fun arg => map_names arg tag))
+
+def wrap_json (a : App) (name : String) : Lean.Json :=
+  Lean.toJson (App.mk name [a])
+
+def map_names_json (a : App) (tag : String) : Lean.Json :=
+  Lean.toJson (map_names a tag)
+
+def head_symbol (a : App) : String := a.f
+"""
+
+    @register_from_lean("App")
+    def _(x) -> App:
+        return x
+
+    mod = from_string(code)
+    assert App.of_dict(mod.idapp(App("foo", []))) == App("foo", [])
+    x = App("x")
+    y = App("y")
+    def f(child: App) -> App:
+        return App("f", [child])
+    tree = f(f(App("g", [x, y])))
+    assert mod.is_subterm(tree, x)
+    assert mod.app_size(tree) == 5
+    assert mod.app_symbols(tree) == ["f", "f", "g", "x", "y"]
+    assert App.of_dict(mod.wrap_json(x, "wrap")) == App("wrap", [x])
+    assert App.of_dict(mod.map_names_json(tree, "p_")) == App(
+        "p_f",
+        [App("p_f", [App("p_g", [App("p_x"), App("p_y")])])],
+    )
+    assert mod.head_symbol(tree) == "f"
 
 
 def test_leanfun_from_num():
