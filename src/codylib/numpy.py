@@ -3,9 +3,9 @@ from __future__ import annotations
 try:
     import numpy as np
 except ImportError as exc:  # pragma: no cover - optional dependency
-    raise ImportError("numpy is required for leancall.numpy") from exc
+    raise ImportError("numpy is required for codylib.numpy") from exc
 
-from .leanfun import to_lean
+from leancall.leanfun import to_lean
 
 
 @to_lean.register(np.generic)

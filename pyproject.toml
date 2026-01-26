@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["lean-interact>=0.10.5"]
+dependencies = [
+    "lark>=1.3.1",
+    "lean-interact>=0.10.5",
+]
 
 
 [tool.hatchling.build]

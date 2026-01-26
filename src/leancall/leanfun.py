@@ -8,6 +8,8 @@ import json
 import re
 from pathlib import Path
 
+from lark import Lark, Transformer
+
 from lean_interact import LeanREPLConfig, LeanServer, Command, FileCommand
 from lean_interact.interface import CommandResponse, LeanError
 
@@ -18,6 +20,116 @@ _DEFAULT_CONFIG = LeanREPLConfig(
 _SERVER: LeanServer | None = None
 type FromLeanHandler = Callable[[str], object]
 _FROM_LEAN_REGISTRY: dict[str, FromLeanHandler] = {}
+
+
+_LEAN_VALUE_GRAMMAR = r"""
+?start: value
+
+?value: record
+      | list
+      | array
+      | tuple
+      | unit
+      | SOME value        -> some
+      | NONE              -> none
+      | BOOL              -> bool
+      | SIGNED_NUMBER     -> number
+      | STRING            -> string
+      | NAME              -> name
+      | "(" value ")"     -> parens
+
+record: "{" [record_fields] "}"
+record_fields: record_field ("," record_field)* ","?
+record_field: NAME ":=" value
+
+list: "[" [value_list] "]"
+array: "#[" [value_list] "]"
+value_list: value ("," value)* ","?
+
+tuple: "(" value "," value ("," value)* ","? ")"
+unit: "(" ")"
+
+BOOL.2: "true" | "false"
+SOME.2: "some"
+NONE.2: "none"
+NAME.1: /[A-Za-z_][A-Za-z0-9_']*/
+
+%import common.SIGNED_NUMBER
+%import common.ESCAPED_STRING -> STRING
+%import common.WS
+%ignore WS
+"""
+
+
+class _LeanValueTransformer(Transformer):
+    def string(self, items):
+        return json.loads(items[0])
+
+    def number(self, items):
+        text = str(items[0])
+        if "." in text or "e" in text or "E" in text:
+            return float(text)
+        return int(text)
+
+    def bool(self, items):
+        return str(items[0]) == "true"
+
+    def none(self, _items):
+        return None
+
+    def some(self, items):
+        value = items[-1]
+        return value
+
+    def name(self, items):
+        return str(items[0])
+
+    def parens(self, items):
+        return items[0]
+
+    def unit(self, _items):
+        return ()
+
+    def list(self, items):
+        if not items:
+            return []
+        return list(items[0])
+
+    def array(self, items):
+        if not items:
+            return []
+        return list(items[0])
+
+    def value_list(self, items):
+        return list(items)
+
+    def tuple(self, items):
+        return tuple(items)
+
+    def record(self, items):
+        if not items:
+            return {}
+        return dict(items[0])
+
+    def record_fields(self, items):
+        return list(items)
+
+    def record_field(self, items):
+        return (str(items[0]), items[1])
+
+
+_LEAN_VALUE_PARSER = Lark(
+    _LEAN_VALUE_GRAMMAR, start="start", parser="lalr", maybe_placeholders=False
+)
+_LEAN_VALUE_TRANSFORMER = _LeanValueTransformer()
+
+
+def parse_lean_value(text: str) -> object:
+    try:
+        tree = _LEAN_VALUE_PARSER.parse(text)
+    except Exception as exc:  # pragma: no cover - error path is exercised in tests
+        raise ValueError(f"Failed to parse Lean value: {text}") from exc
+    return _LEAN_VALUE_TRANSFORMER.transform(tree)
 
 
 def register_from_lean(type_name: str) -> Callable[[FromLeanHandler], FromLeanHandler]:
@@ -84,6 +196,7 @@ def _(x: None) -> str:
     return "none"
 
 
+# Or should this use anonymous record syntax?
 @to_lean.register(dict)
 def _(x: dict) -> str:
     return _to_lean_json(x)
@@ -130,133 +243,17 @@ def _to_lean_json(value: object) -> str:
     raise Exception(f"Cannot convert {value} to Lean.Json")
 
 
-def _split_top_level(text: str, sep: str = ",") -> list[str]:
-    if not text:
-        return []
-    parts: list[str] = []
-    buf: list[str] = []
-    depth = 0
-    in_string = False
-    escape = False
-    for ch in text:
-        if in_string:
-            buf.append(ch)
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-            buf.append(ch)
-            continue
-        if ch in "([":
-            depth += 1
-        elif ch in ")]":
-            depth -= 1
-        if ch == sep and depth == 0:
-            parts.append("".join(buf).strip())
-            buf = []
-        else:
-            buf.append(ch)
-    if buf:
-        parts.append("".join(buf).strip())
-    return [part for part in parts if part]
-
-
-def _split_product_types(typ: str) -> list[str]:
-    parts: list[str] = []
-    buf: list[str] = []
-    depth = 0
-    for ch in typ:
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-        if ch == "×" and depth == 0:
-            parts.append("".join(buf).strip())
-            buf = []
-        else:
-            buf.append(ch)
-    if buf:
-        parts.append("".join(buf).strip())
-    return [part for part in parts if part]
-
-
-def _parse_string(text: str) -> str:
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return text.strip('"')
-
-
-def _strip_outer_parens(text: str) -> str:
-    text = text.strip()
-    if not (text.startswith("(") and text.endswith(")")):
-        return text
-    depth = 0
-    for idx, ch in enumerate(text):
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if depth == 0 and idx != len(text) - 1:
-                return text
-    return text[1:-1].strip()
-
-
-def from_lean(x: str, typ: str) -> object:
+def from_lean(x: str, typ: str | None = None) -> object:
     x = x.strip()
-    typ = _strip_outer_parens(typ)
     if typ in _FROM_LEAN_REGISTRY:
         return _FROM_LEAN_REGISTRY[typ](x)
-    if typ in {"Nat", "Int"}:
-        value = int(x)
-        if typ == "Nat" and value < 0:
-            raise ValueError(f"Expected Nat, got {x}")
-        return value
-    if typ == "Bool":
-        if x not in {"true", "false"}:
-            raise ValueError(f"Expected Bool, got {x}")
-        return x == "true"
-    if typ == "String":
-        return _parse_string(x)
-    if typ in {"Json", "Lean.Json"}:
-        return json.loads(x)
-    if typ == "Float":
-        return float(x)
-    if typ == "Unit":
-        if x != "()":
-            raise ValueError(f"Expected Unit, got {x}")
-        return ()
-    if typ.startswith("Option "):
-        option_x = _strip_outer_parens(x)
-        if option_x == "none":
-            return None
-        if option_x.startswith("some "):
-            inner_typ = typ[len("Option ") :].strip()
-            return from_lean(option_x[len("some ") :], inner_typ)
-        raise ValueError(f"Expected Option, got {option_x}")
-    if typ.startswith("List "):
-        inner_typ = typ[len("List ") :].strip()
-        if not (x.startswith("[") and x.endswith("]")):
-            raise ValueError(f"Expected List, got {x}")
-        content = x[1:-1].strip()
-        if not content:
-            return []
-        return [from_lean(part, inner_typ) for part in _split_top_level(content)]
-    if "×" in typ:
-        typ_parts = _split_product_types(typ)
-        if not (x.startswith("(") and x.endswith(")")):
-            raise ValueError(f"Expected tuple, got {x}")
-        content = x[1:-1].strip()
-        values = _split_top_level(content)
-        if len(values) != len(typ_parts):
-            raise ValueError(f"Tuple arity mismatch: {x} : {typ}")
-        return tuple(from_lean(val, t) for val, t in zip(values, typ_parts))
-    raise ValueError(f"Unsupported Lean type {typ}")
+    try:
+        return parse_lean_value(x)
+    except ValueError:
+        try:
+            return json.loads(x)
+        except json.JSONDecodeError:
+            raise ValueError("Could not parse lean response", x)
 
 
 def _extract_def_names(code: str) -> list[str]:
@@ -275,24 +272,10 @@ def _raise_on_errors(result: CommandResponse | LeanError) -> None:
             raise ValueError(message.data)
 
 
-def _infer_return_type(server: LeanServer, name: str, env: int | None) -> str:
-    res = server.run(Command(cmd=f"#check {name}", env=env))
-    _raise_on_errors(res)
-    if isinstance(res, LeanError) or not res.messages:
-        raise ValueError(f"No type information for {name}")
-    full_type = res.messages[0].data.split(":")[-1].strip()
-    if "->" in full_type:
-        return full_type.split("->")[-1].strip()
-    if "→" in full_type:
-        return full_type.split("→")[-1].strip()
-    return full_type
-
-
 @dataclass(frozen=True)
 class LeanFun:
     name: str
     env: int | None
-    res_type: str
     server: LeanServer
     code: str | None = None
 
@@ -311,7 +294,7 @@ class LeanFun:
         ]
         if not info_messages:
             raise ValueError("No evaluation result returned")
-        return from_lean(info_messages[0].data, self.res_type)
+        return from_lean(info_messages[0].data)
 
 
 @dataclass(frozen=True)
@@ -338,8 +321,7 @@ def from_string(
     server: LeanServer | None = None,
 ) -> LeanModule:
     server_obj = server if server is not None else get_server()
-    full_code = "import Lean\n" + code
-    res = server_obj.run(Command(cmd=full_code, env=env))
+    res = server_obj.run(Command(cmd=code, env=env))
     _raise_on_errors(res)
     if isinstance(res, LeanError):
         raise ValueError(res.message)
@@ -381,7 +363,6 @@ def _build_funcs(
         LeanFun(
             name=name,
             env=env,
-            res_type=_infer_return_type(server, name, env),
             server=server,
             code=code,
         )

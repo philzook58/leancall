@@ -66,6 +66,11 @@ def test_from_lean_primitives():
     assert from_lean("()", "Unit") == ()
 
 
+def test_from_lean_record_literal():
+    record = '{f := "foo", args := [],}'
+    assert from_lean(record, "Record") == {"f": "foo", "args": []}
+
+
 def test_from_lean_registry():
     @register_from_lean("MyType")
     def _(value: str) -> object:
@@ -75,7 +80,7 @@ def test_from_lean_registry():
 
 
 def test_leanfun_json_roundtrip():
-    code = "def idJson (x : Json) := x"
+    code = "import Lean\ndef idJson (x : Json) := x"
     module = from_string(code)
     payload = {"a": 1, "b": [2, 3]}
     assert module.idJson(payload) == payload
@@ -201,8 +206,10 @@ def head_symbol (a : App) : String := a.f
     assert App.of_dict(mod.idapp(App("foo", []))) == App("foo", [])
     x = App("x")
     y = App("y")
+
     def f(child: App) -> App:
         return App("f", [child])
+
     tree = f(f(App("g", [x, y])))
     assert mod.is_subterm(tree, x)
     assert mod.app_size(tree) == 5
@@ -251,7 +258,37 @@ def test_to_lean_numpy_array():
 
     assert cody_numpy is not None
     arr = np.array([[1, 2], [3, 4]], dtype=np.int64)
-    assert to_lean(arr) == "[[1, 2], [3, 4]]"
+    assert to_lean(arr) == "#[#[1, 2], #[3, 4]]"
+
+    code = "def idArray (x : Array (Array Int)) := x"
+    mod = from_string(code)
+    assert mod.idArray(arr) == [[1, 2], [3, 4]]
+
+
+def test_leanfun_array_literal_roundtrip():
+    pytest.importorskip("numpy")
+    import leancall.numpy as cody_numpy
+
+    assert cody_numpy is not None
+    code = """
+def makeArray (x : Nat) : Array (Array Nat) :=
+  #[#[x, x + 1], #[]]
+"""
+    mod = from_string(code)
+    assert mod.makeArray(3) == [[3, 4], []]
+
+
+def test_leanfun_list_and_tuple_results():
+    code = """
+def tokenize (s : String) : List String :=
+  s.splitOn ","
+
+def nestedTuple : Nat × (String × Bool) :=
+  (1, ("hi", true))
+    """
+    mod = from_string(code)
+    assert mod.tokenize("a,b,c") == ["a", "b", "c"]
+    assert mod.nestedTuple() == (1, "hi", True)
 
 
 @pytest.fixture(scope="module")
