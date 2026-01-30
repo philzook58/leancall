@@ -242,6 +242,16 @@ def test_leanfun_kwargs_rejected():
     assert module.sum3(1, z=8, y=3) == 12
 
 
+def test_leanfun_kwargs_call_lean():
+    code = """
+def makeGreeting (name title : String) (punct : String) : String :=
+  s!"Hello, {title} {name}{punct}"
+"""
+    module = from_string(code)
+    assert isinstance(module, LeanModule)
+    assert module.makeGreeting(name="Ada", title="Dr.", punct="!") == "Hello, Dr. Ada!"
+
+
 def test_to_lean_numpy_scalars():
     np = pytest.importorskip("numpy")
     import leancall.numpy as cody_numpy

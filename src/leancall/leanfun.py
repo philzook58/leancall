@@ -119,17 +119,19 @@ class _LeanValueTransformer(Transformer):
 
 
 _LEAN_VALUE_PARSER = Lark(
-    _LEAN_VALUE_GRAMMAR, start="start", parser="lalr", maybe_placeholders=False
+    _LEAN_VALUE_GRAMMAR,
+    start="start",
+    parser="lalr",
+    maybe_placeholders=False,
+    transformer=_LeanValueTransformer(),
 )
-_LEAN_VALUE_TRANSFORMER = _LeanValueTransformer()
 
 
 def parse_lean_value(text: str) -> object:
     try:
-        tree = _LEAN_VALUE_PARSER.parse(text)
+        return _LEAN_VALUE_PARSER.parse(text)
     except Exception as exc:  # pragma: no cover - error path is exercised in tests
         raise ValueError(f"Failed to parse Lean value: {text}") from exc
-    return _LEAN_VALUE_TRANSFORMER.transform(tree)
 
 
 def register_from_lean(type_name: str) -> Callable[[FromLeanHandler], FromLeanHandler]:
