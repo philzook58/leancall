@@ -288,6 +288,20 @@ def makeArray (x : Nat) : Array (Array Nat) :=
     assert mod.makeArray(3) == [[3, 4], []]
 
 
+def test_other_parse():
+    import leancall.numpy as cody_numpy
+
+    code = "def myfun N := List.replicate N 0"
+    mod = from_string(code)
+    assert mod.myfun(5, parse="json") == [0, 0, 0, 0, 0]
+    assert mod.myfun(5, parse="eval") == [0, 0, 0, 0, 0]
+
+    assert cody_numpy.parse(mod.myfun(5, parse=None)).shape == (5,)
+    code = "def myfun N := Array.replicate N 0.00001"
+    mod = from_string(code)
+    assert cody_numpy.parse(mod.myfun(5, parse=None)).shape == (5,)
+
+
 def test_leanfun_list_and_tuple_results():
     code = """
 def tokenize (s : String) : List String :=

@@ -7,6 +7,7 @@ from functools import singledispatch
 import json
 import re
 from pathlib import Path
+import ast
 
 from lark import Lark, Transformer
 
@@ -281,7 +282,7 @@ class LeanFun:
     server: LeanServer
     code: str | None = None
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args, parse="lark", **kwargs):
         arg_parts = [to_lean(arg) for arg in args]
         for key, value in kwargs.items():
             arg_parts.append(f"({key} := {to_lean(value)})")
@@ -296,7 +297,17 @@ class LeanFun:
         ]
         if not info_messages:
             raise ValueError("No evaluation result returned")
-        return from_lean(info_messages[0].data)
+        data = info_messages[0].data
+        if parse == "lark":
+            return from_lean(data)
+        elif parse is None:
+            return data
+        elif parse == "eval":
+            return ast.literal_eval(data)
+        elif parse == "json":
+            return json.loads(data)
+        else:
+            raise ValueError(f"Unknown parse option: {parse}")
 
 
 @dataclass(frozen=True)
