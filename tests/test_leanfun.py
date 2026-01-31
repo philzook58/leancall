@@ -244,9 +244,9 @@ def makeGreeting (name title : String) (punct : String) : String :=
 
 def test_to_lean_numpy_scalars():
     np = pytest.importorskip("numpy")
-    import leancall.numpy as cody_numpy
+    import leancall.numpy as lcnp
 
-    assert cody_numpy is not None
+    assert lcnp is not None
     assert to_lean(np.int64(-3)) == "(-3)"
     assert to_lean(np.float32(1.5)) == "1.5"
     assert to_lean(np.bool_(True)) == "true"
@@ -254,9 +254,9 @@ def test_to_lean_numpy_scalars():
 
 def test_to_lean_numpy_array():
     np = pytest.importorskip("numpy")
-    import leancall.numpy as cody_numpy
+    import leancall.numpy as lcnp
 
-    assert cody_numpy is not None
+    assert lcnp is not None
     arr = np.array([[1, 2], [3, 4]], dtype=np.int64)
     assert to_lean(arr) == "#[#[1, 2], #[3, 4]]"
 
@@ -267,9 +267,9 @@ def test_to_lean_numpy_array():
 
 def test_leanfun_array_literal_roundtrip():
     pytest.importorskip("numpy")
-    import leancall.numpy as cody_numpy
+    import leancall.numpy as lcnp
 
-    assert cody_numpy is not None
+    assert lcnp is not None
     code = """
 def makeArray (x : Nat) : Array (Array Nat) :=
   #[#[x, x + 1], #[]]
@@ -301,17 +301,17 @@ def test_custom_to_lean_method():
 
 
 def test_other_parse():
-    import leancall.numpy as cody_numpy
+    import leancall.numpy as lcnp
 
     code = "def myfun N := List.replicate N 0"
     mod = from_string(code)
     assert mod.myfun(5, parse="json") == [0, 0, 0, 0, 0]
     assert mod.myfun(5, parse="eval") == [0, 0, 0, 0, 0]
 
-    assert cody_numpy.parse(mod.myfun(5, parse=None)).shape == (5,)
+    assert lcnp.parse(mod.myfun(5, parse=None)).shape == (5,)
     code = "def myfun N := Array.replicate N 0.00001"
     mod = from_string(code)
-    assert cody_numpy.parse(mod.myfun(5, parse=None)).shape == (5,)
+    assert lcnp.parse(mod.myfun(5, parse=None)).shape == (5,)
 
 
 def test_leanfun_list_and_tuple_results():

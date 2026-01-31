@@ -124,4 +124,22 @@ assert Foo(**data) == Foo(3, "hi")
 | `set` / `frozenset` | `Std.HashSet` | Encoded as `Std.HashSet.ofList`. |
 | `Array` | `Array` | Use `leancall.leanfun.Array` wrapper to emit Lean array literals (`#[...]`). |
 | `dataclass` | record literal | Uses `{field := value}` notation; register `from_lean` to deserialize. |
-| `numpy.ndarray` | `Array` / `List` | Converts via `leancall.numpy` helpers. |
+| `numpy.ndarray` | `Array` / `List` | Requires importing `leancall.numpy` |
+
+## Faster parsing with numpy
+
+When numpy is available, you can use `leancall.numpy.parse` to decode large arrays faster.
+
+```python
+import numpy as np
+from leancall import from_string
+import leancall.numpy as lcnp
+
+code = "def makeArray (n : Nat) : Array Nat := Array.range n"
+mod = from_string(code)
+
+raw = mod.makeArray(100000, parse=None)
+assert len(raw) > 0
+arr = lcnp.parse(raw)
+assert arr.shape == (100000,)
+```
