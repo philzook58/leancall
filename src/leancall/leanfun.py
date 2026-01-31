@@ -23,10 +23,16 @@ type FromLeanHandler = Callable[[str], object]
 _FROM_LEAN_REGISTRY: dict[str, FromLeanHandler] = {}
 
 
+@dataclass(frozen=True)
+class HashMap:
+    d: dict
+
+
 _LEAN_VALUE_GRAMMAR = r"""
 ?start: value
 
-?value: record
+?value: application
+      | record
       | list
       | array
       | tuple
@@ -38,6 +44,8 @@ _LEAN_VALUE_GRAMMAR = r"""
       | STRING            -> string
       | NAME              -> name
       | "(" value ")"     -> parens
+
+application: NAME value+  -> application
 
 record: "{" [record_fields] "}"
 record_fields: record_field ("," record_field)* ","?
@@ -53,7 +61,7 @@ unit: "(" ")"
 BOOL.2: "true" | "false"
 SOME.2: "some"
 NONE.2: "none"
-NAME.1: /[A-Za-z_][A-Za-z0-9_']*/
+NAME.1: /[A-Za-z_][A-Za-z0-9_'.]*/
 
 %import common.SIGNED_NUMBER
 %import common.ESCAPED_STRING -> STRING
@@ -117,6 +125,29 @@ class _LeanValueTransformer(Transformer):
 
     def record_field(self, items):
         return (str(items[0]), items[1])
+
+    def application(self, items):
+        name = str(items[0])
+        args = list(items[1:])
+        if name.endswith("Std.HashMap.ofList") or name.endswith("HashMap.ofList"):
+            if len(args) == 1 and isinstance(args[0], list):
+                result = {}
+                for entry in args[0]:
+                    if isinstance(entry, tuple) and len(entry) == 2:
+                        result[entry[0]] = entry[1]
+                    else:
+                        raise ValueError(f"Invalid HashMap entry: {entry}")
+                return result
+        if name.endswith("Std.HashSet.ofList") or name.endswith("HashSet.ofList"):
+            if len(args) == 1 and isinstance(args[0], list):
+                result = set()
+                for entry in args[0]:
+                    try:
+                        result.add(entry)
+                    except TypeError as exc:
+                        raise ValueError(f"Unhashable HashSet entry: {entry}") from exc
+                return result
+        return {"_app": name, "args": args}
 
 
 _LEAN_VALUE_PARSER = Lark(
@@ -194,9 +225,29 @@ def _(x: tuple) -> str:
     return "(" + ", ".join(map(to_lean, x)) + ")"
 
 
+@to_lean.register
+def _(x: HashMap) -> str:
+    items = ", ".join(
+        f"({to_lean(key)}, {to_lean(value)})" for key, value in x.d.items()
+    )
+    return f"(Std.HashMap.ofList [{items}])"
+
+
 @to_lean.register(type(None))
 def _(x: None) -> str:
     return "none"
+
+
+@to_lean.register(set)
+def _(x: set) -> str:
+    items = ", ".join(to_lean(item) for item in x)
+    return f"(Std.HashSet.ofList [{items}])"
+
+
+@to_lean.register(frozenset)
+def _(x: frozenset) -> str:
+    items = ", ".join(to_lean(item) for item in x)
+    return f"(Std.HashSet.ofList [{items}])"
 
 
 # Or should this use anonymous record syntax?
@@ -250,6 +301,17 @@ def from_lean(x: str, typ: str | None = None) -> object:
     x = x.strip()
     if typ in _FROM_LEAN_REGISTRY:
         return _FROM_LEAN_REGISTRY[typ](x)
+    if x.startswith("Std.HashMap.ofList"):
+        match = re.match(r"^Std\\.HashMap\\.ofList\\s+(\\[.*\\])\\s*$", x)
+        if match:
+            entries = parse_lean_value(match.group(1))
+            if isinstance(entries, list):
+                result = {}
+                for entry in entries:
+                    if not (isinstance(entry, tuple) and len(entry) == 2):
+                        raise ValueError(f"Invalid HashMap entry: {entry}")
+                    result[entry[0]] = entry[1]
+                return result
     try:
         return parse_lean_value(x)
     except ValueError:

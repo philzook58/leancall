@@ -7,6 +7,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from leancall.leanfun import (
+    HashMap,
     LeanModule,
     from_file,
     from_lean,
@@ -313,6 +314,54 @@ def nestedTuple : Nat × (String × Bool) :=
     mod = from_string(code)
     assert mod.tokenize("a,b,c") == ["a", "b", "c"]
     assert mod.nestedTuple() == (1, "hi", True)
+
+
+def test_hashmap():
+    code = """
+import Std.Data.HashMap
+def makeMap : Std.HashMap String Nat := Std.HashMap.ofList [("a", 1), ("b", 2)]
+    """
+    mod = from_string(code)
+    result = mod.makeMap()
+    assert result == {"a": 1, "b": 2}
+
+
+def test_hashmap_wrapper_to_lean():
+    code = """
+import Std.Data.HashMap
+def sumMap (m : Std.HashMap String Nat) : Nat :=
+  (Std.HashMap.toList m).foldl
+    (fun acc kv => if kv.1 == "a" || kv.1 == "b" then acc + kv.2 else acc) 0
+    """
+    mod = from_string(code)
+    payload = HashMap({"a": 2, "b": 5})
+    assert mod.sumMap(payload) == 7
+
+
+def test_hashset_roundtrip_and_to_lean():
+    code = """
+import Std.Data.HashSet
+
+def makeSet : Std.HashSet Nat := Std.HashSet.ofList [1, 2, 3, 2]
+
+def sumSet (s : Std.HashSet Nat) : Nat :=
+  (Std.HashSet.toList s).foldl (fun acc x => acc + x) 0
+    """
+    mod = from_string(code)
+    assert mod.makeSet() == {1, 2, 3}
+    assert mod.sumSet({1, 2, 3}) == 6
+    assert mod.sumSet(frozenset({2, 4})) == 6
+
+
+def test_hashmap_and_tuple_roundtrip():
+    code = """
+import Std.Data.HashMap
+def makeMap2 : Std.HashMap String Nat := Std.HashMap.ofList [("foo", 3), ("bar", 5), ("baz", 8)]
+def makeTuple2 : Nat × (String × Int) := (7, ("hi", -4))
+    """
+    mod = from_string(code)
+    assert mod.makeMap2() == {"foo": 3, "bar": 5, "baz": 8}
+    assert mod.makeTuple2() == (7, "hi", -4)
 
 
 @pytest.fixture(scope="module")

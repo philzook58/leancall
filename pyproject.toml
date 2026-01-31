@@ -19,4 +19,7 @@ packages = ["src/leancall"]
 
 [dependency-groups]
 dev = ["hypothesis>=6.150.2", "numpy>=1.26", "pytest>=9.0.2"]
-extra = ["numpy>=2.4.1"]
+extra = [
+    "cffi>=2.0.0",
+    "numpy>=2.4.1",
+]
