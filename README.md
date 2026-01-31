@@ -100,10 +100,10 @@ structure Foo where
   y : String
 deriving Repr
 
-def showFoo (f : Foo) : String := reprStr f
+def idFoo (f : Foo) : String := reprStr f
 """
 mod = from_string(code)
-raw = mod.showFoo(Foo(3, "hi"))
+raw = mod.idFoo(Foo(3, "hi"))
 data = from_lean(raw)
 assert Foo(**data) == Foo(3, "hi")
 ```
@@ -135,11 +135,11 @@ import numpy as np
 from leancall import from_string
 import leancall.numpy as lcnp
 
-code = "def makeArray (n : Nat) : Array Nat := Array.range n"
+code = "def idArray (xs : Array Nat) : Array Nat := xs"
 mod = from_string(code)
 
-raw = mod.makeArray(100000, parse=None)
+raw = mod.idArray(np.arange(100, dtype=np.int64), parse=None)
 assert len(raw) > 0
 arr = lcnp.parse(raw)
-assert arr.shape == (100000,)
+assert arr.shape == (100,)
 ```
