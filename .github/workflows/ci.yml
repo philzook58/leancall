@@ -37,7 +37,9 @@ jobs:
           uv run pytest
 
       - name: Type check
-        run: uvx ty check
+        run: |
+          source ~/.profile
+          uvx ty check
 
       - name: Lint
         run: uvx ruff check

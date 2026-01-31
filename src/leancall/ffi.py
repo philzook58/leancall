@@ -19,7 +19,7 @@ from lean_interact.interface import CommandResponse, LeanError
 from .leanfun import get_server
 
 try:
-    import cffi
+    import cffi  # type: ignore[unresolved-import]
 except ImportError as exc:  # pragma: no cover - optional dependency
     raise ImportError("cffi is required for leancall.ffi") from exc
 from lark import Lark, Transformer, v_args
