@@ -38,20 +38,74 @@ from leancall import from_string
 code = "def add (x y : Int) := x + y"
 mod = from_string(code)
 
-print(mod.add(2, 3))  # 5
+assert mod.add(2, 3) == 5
 ```
 
 Load from a `.lean` file:
 
 ```python
+from pathlib import Path
 from leancall import from_file
 
+fixture = Path("tests/fixtures/lean_ids.lean").resolve()
 mod = from_file(
-    "tests/fixtures/lean_ids.lean",
+    str(fixture),
     names=["idNat", "idInt", "idBool", "idString"],
 )
 
-print(mod.idBool(False))  # False
+assert mod.idBool(False) is False
+```
+
+Raw output (skip parsing):
+
+```python
+from leancall import from_string
+
+code = "def addStr (x y : Int) := x + y"
+mod = from_string(code)
+
+assert mod.addStr(2, 3, parse=None) == "5"
+```
+
+JSON roundtrip (deserialize to Python dict):
+
+```python
+from leancall import from_string
+from leancall.leanfun import Json
+
+code = "import Lean\ndef idJson (x : Json) := x"
+mod = from_string(code)
+
+payload = {"a": 1, "b": [2, 3]}
+assert mod.idJson(Json(payload)) == {"a": 1, "b": [2, 3]}
+```
+
+Dataclass + Lean structure hookup:
+
+```python
+from dataclasses import dataclass
+from leancall import from_string
+from leancall.leanfun import from_lean
+
+
+@dataclass(frozen=True)
+class Foo:
+    x: int
+    y: str
+
+
+code = """
+structure Foo where
+  x : Nat
+  y : String
+deriving Repr
+
+def showFoo (f : Foo) : String := reprStr f
+"""
+mod = from_string(code)
+raw = mod.showFoo(Foo(3, "hi"))
+data = from_lean(raw)
+assert Foo(**data) == Foo(3, "hi")
 ```
 
 ## Type Mapping
@@ -65,6 +119,9 @@ print(mod.idBool(False))  # False
 | `list[T]` | `List T` | Recurses on element type. |
 | `tuple` | `α × β × ...` | Uses Lean product types. |
 | `None` | `Option _` | `none` on input; `Option` deserializes to `None`. |
-| `dict` | `Json` / `Lean.Json` | Encoded as Lean JSON constructors. |
+| `dict` | `Std.HashMap` | Encoded as `Std.HashMap.ofList`. |
+| `Json` | `Json` / `Lean.Json` | Use `leancall.leanfun.Json` wrapper to emit Lean JSON constructors. |
+| `set` / `frozenset` | `Std.HashSet` | Encoded as `Std.HashSet.ofList`. |
+| `Array` | `Array` | Use `leancall.leanfun.Array` wrapper to emit Lean array literals (`#[...]`). |
 | `dataclass` | record literal | Uses `{field := value}` notation; register `from_lean` to deserialize. |
 | `numpy.ndarray` | `Array` / `List` | Converts via `leancall.numpy` helpers. |

@@ -5,7 +5,6 @@ from .leanfun import (
     from_lean,
     from_string,
     get_server,
-    register_from_lean,
     to_lean,
 )
 
@@ -16,6 +15,5 @@ __all__ = [
     "from_lean",
     "from_string",
     "get_server",
-    "register_from_lean",
     "to_lean",
 ]

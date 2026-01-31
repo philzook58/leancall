@@ -7,15 +7,16 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from leancall.leanfun import (
-    HashMap,
+    Array,
+    Json,
     LeanModule,
     from_file,
     from_lean,
     from_string,
-    register_from_lean,
     to_lean,
 )
 from dataclasses import dataclass, field
+from typing import cast
 
 
 def test_to_lean_string_escape():
@@ -29,7 +30,7 @@ def test_lean_num_string():
     assert to_lean(True) == "true"
     assert to_lean("lean") == '"lean"'
     assert (
-        to_lean({"a": 1, "b": [2, 3]})
+        to_lean(Json({"a": 1, "b": [2, 3]}))
         == 'Lean.Json.mkObj [("a", (1 : Lean.Json)), ("b", Lean.Json.arr #[(2 : Lean.Json), (3 : Lean.Json)])]'
     )
 
@@ -57,34 +58,26 @@ def test_to_lean_dataclass():
 
 
 def test_from_lean_primitives():
-    assert from_lean("2", "Nat") == 2
-    assert from_lean("-3", "Int") == -3
-    assert from_lean("true", "Bool") is True
-    assert from_lean('"hi"', "String") == "hi"
-    assert from_lean('{"a": 1, "b": [2, 3]}', "Json") == {"a": 1, "b": [2, 3]}
-    assert from_lean('{"x": {"y": 2}}', "Lean.Json") == {"x": {"y": 2}}
-    assert from_lean("1.5", "Float") == 1.5
-    assert from_lean("()", "Unit") == ()
+    assert from_lean("2") == 2
+    assert from_lean("-3") == -3
+    assert from_lean("true") is True
+    assert from_lean('"hi"') == "hi"
+    assert from_lean('{"a": 1, "b": [2, 3]}') == {"a": 1, "b": [2, 3]}
+    assert from_lean('{"x": {"y": 2}}') == {"x": {"y": 2}}
+    assert from_lean("1.5") == 1.5
+    assert from_lean("()") == ()
 
 
 def test_from_lean_record_literal():
     record = '{f := "foo", args := [],}'
-    assert from_lean(record, "Record") == {"f": "foo", "args": []}
-
-
-def test_from_lean_registry():
-    @register_from_lean("MyType")
-    def _(value: str) -> object:
-        return f"parsed:{value}"
-
-    assert from_lean("foo", "MyType") == "parsed:foo"
+    assert from_lean(record) == {"f": "foo", "args": []}
 
 
 def test_leanfun_json_roundtrip():
     code = "import Lean\ndef idJson (x : Json) := x"
     module = from_string(code)
     payload = {"a": 1, "b": [2, 3]}
-    assert module.idJson(payload) == payload
+    assert module.idJson(Json(payload)) == payload
 
 
 def test_leanfun_dataclass_argument():
@@ -108,24 +101,24 @@ def test_leanfun_dataclass_argument():
 
 
 def test_from_lean_list_tuple_option():
-    assert from_lean("[1, 2, 3]", "List Int") == [1, 2, 3]
-    assert from_lean("(1, 2)", "Nat × Nat") == (1, 2)
-    assert from_lean("none", "Option Int") is None
-    assert from_lean("some 4", "Option Nat") == 4
-    assert from_lean("some (some 4)", "Option (Option Nat)") == 4
-    assert from_lean("[[], [1, 2], [3]]", "List (List Nat)") == [[], [1, 2], [3]]
-    assert from_lean("(1, (2, 3))", "Nat × (Nat × Nat)") == (1, (2, 3))
+    assert from_lean("[1, 2, 3]") == [1, 2, 3]
+    assert from_lean("(1, 2)") == (1, 2)
+    assert from_lean("none") is None
+    assert from_lean("some 4") == 4
+    assert from_lean("some (some 4)") == 4
+    assert from_lean("[[], [1, 2], [3]]") == [[], [1, 2], [3]]
+    assert from_lean("(1, (2, 3))") == (1, (2, 3))
 
 
 def test_from_lean_nested_structures():
-    assert from_lean("[[1], [2, 3]]", "List (List Nat)") == [[1], [2, 3]]
-    assert from_lean("((1, 2), (3, 4))", "(Nat × Nat) × (Nat × Nat)") == (
+    assert from_lean("[[1], [2, 3]]") == [[1], [2, 3]]
+    assert from_lean("((1, 2), (3, 4))") == (
         (1, 2),
         (3, 4),
     )
-    assert from_lean("some [1, 2]", "Option (List Nat)") == [1, 2]
-    assert from_lean("some (1, 2)", "Option (Nat × Nat)") == (1, 2)
-    assert from_lean("(1, ((2, none), 3))", "Nat × ((Nat × Option Nat) × Nat)") == (
+    assert from_lean("some [1, 2]") == [1, 2]
+    assert from_lean("some (1, 2)") == (1, 2)
+    assert from_lean("(1, ((2, none), 3))") == (
         1,
         ((2, None), 3),
     )
@@ -199,12 +192,8 @@ def map_names_json (a : App) (tag : String) : Lean.Json :=
 def head_symbol (a : App) : String := a.f
 """
 
-    @register_from_lean("App")
-    def _(x) -> App:
-        return x
-
     mod = from_string(code)
-    assert App.of_dict(mod.idapp(App("foo", []))) == App("foo", [])
+    assert App.of_dict(cast(dict, mod.idapp(App("foo", [])))) == App("foo", [])
     x = App("x")
     y = App("y")
 
@@ -215,8 +204,8 @@ def head_symbol (a : App) : String := a.f
     assert mod.is_subterm(tree, x)
     assert mod.app_size(tree) == 5
     assert mod.app_symbols(tree) == ["f", "f", "g", "x", "y"]
-    assert App.of_dict(mod.wrap_json(x, "wrap")) == App("wrap", [x])
-    assert App.of_dict(mod.map_names_json(tree, "p_")) == App(
+    assert App.of_dict(cast(dict, mod.wrap_json(x, "wrap"))) == App("wrap", [x])
+    assert App.of_dict(cast(dict, mod.map_names_json(tree, "p_"))) == App(
         "p_f",
         [App("p_f", [App("p_g", [App("p_x"), App("p_y")])])],
     )
@@ -289,6 +278,28 @@ def makeArray (x : Nat) : Array (Array Nat) :=
     assert mod.makeArray(3) == [[3, 4], []]
 
 
+def test_array_wrapper_to_lean():
+    code = """
+def sumArray (xs : Array Nat) : Nat :=
+  xs.foldl (fun acc x => acc + x) 0
+    """
+    mod = from_string(code)
+    assert mod.sumArray(Array([1, 2, 3])) == 6
+
+
+def test_custom_to_lean_method():
+    class MyLean:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+        def to_lean(self) -> str:
+            return str(self.value)
+
+    code = "def add1 (x : Int) : Int := x + 1"
+    mod = from_string(code)
+    assert mod.add1(MyLean(4)) == 5
+
+
 def test_other_parse():
     import leancall.numpy as cody_numpy
 
@@ -334,8 +345,7 @@ def sumMap (m : Std.HashMap String Nat) : Nat :=
     (fun acc kv => if kv.1 == "a" || kv.1 == "b" then acc + kv.2 else acc) 0
     """
     mod = from_string(code)
-    payload = HashMap({"a": 2, "b": 5})
-    assert mod.sumMap(payload) == 7
+    assert mod.sumMap({"a": 2, "b": 5}) == 7
 
 
 def test_hashset_roundtrip_and_to_lean():

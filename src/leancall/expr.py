@@ -11,7 +11,7 @@ from typing import cast
 
 from lark import Lark, Transformer
 
-from .leanfun import to_lean, register_from_lean
+from .leanfun import to_lean
 
 
 class Expr: ...
@@ -393,7 +393,3 @@ def parse_lean_expr(text: str) -> Expr:
     normalized = _normalize_expr_text(text.strip())
     return cast(Expr, _LEAN_EXPR_PARSER.parse(normalized))
 
-
-@register_from_lean("Lean.Expr")
-def _from_lean_expr(text: str) -> Expr:
-    return parse_lean_expr(text)

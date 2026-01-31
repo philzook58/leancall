@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
 from decimal import Decimal
-from typing import Callable
 from functools import singledispatch
 import json
 import re
@@ -19,13 +18,14 @@ _DEFAULT_CONFIG = LeanREPLConfig(
     verbose=True, build_repl=True
 )  # download and build Lean REPL
 _SERVER: LeanServer | None = None
-type FromLeanHandler = Callable[[str], object]
-_FROM_LEAN_REGISTRY: dict[str, FromLeanHandler] = {}
+@dataclass(frozen=True)
+class Json:
+    d: dict
 
 
 @dataclass(frozen=True)
-class HashMap:
-    d: dict
+class Array:
+    items: list
 
 
 _LEAN_VALUE_GRAMMAR = r"""
@@ -166,14 +166,6 @@ def parse_lean_value(text: str) -> object:
         raise ValueError(f"Failed to parse Lean value: {text}") from exc
 
 
-def register_from_lean(type_name: str) -> Callable[[FromLeanHandler], FromLeanHandler]:
-    def decorator(func):
-        _FROM_LEAN_REGISTRY[type_name] = func
-        return func
-
-    return decorator
-
-
 def get_server(config: LeanREPLConfig | None = None) -> LeanServer:
     global _SERVER
     if _SERVER is None:
@@ -188,6 +180,9 @@ def to_lean(x: object) -> str:
         for field in fields(x):
             items.append(f"{field.name} := {to_lean(getattr(x, field.name))}")
         return "{" + ", ".join(items) + "}"
+    to_lean_attr = getattr(x, "to_lean", None)
+    if callable(to_lean_attr):
+        return to_lean_attr()
     raise Exception(
         f"Cannot convert {x} of type {type(x)} to Lean using `leancall.to_lean`. Maybe you need to import an optional module?"
     )
@@ -220,17 +215,14 @@ def _(x: list) -> str:
     return "[" + ", ".join(map(to_lean, x)) + "]"
 
 
+@to_lean.register
+def _(x: Array) -> str:
+    return "#[" + ", ".join(map(to_lean, x.items)) + "]"
+
+
 @to_lean.register(tuple)
 def _(x: tuple) -> str:
     return "(" + ", ".join(map(to_lean, x)) + ")"
-
-
-@to_lean.register
-def _(x: HashMap) -> str:
-    items = ", ".join(
-        f"({to_lean(key)}, {to_lean(value)})" for key, value in x.d.items()
-    )
-    return f"(Std.HashMap.ofList [{items}])"
 
 
 @to_lean.register(type(None))
@@ -253,7 +245,13 @@ def _(x: frozenset) -> str:
 # Or should this use anonymous record syntax?
 @to_lean.register(dict)
 def _(x: dict) -> str:
-    return _to_lean_json(x)
+    items = ", ".join(f"({to_lean(k)}, {to_lean(v)})" for k, v in x.items())
+    return f"(Std.HashMap.ofList [{items}])"
+
+
+@to_lean.register
+def _(x: Json) -> str:
+    return _to_lean_json(x.d)
 
 
 def _float_to_json_number(value: float) -> tuple[int, int]:
@@ -297,10 +295,8 @@ def _to_lean_json(value: object) -> str:
     raise Exception(f"Cannot convert {value} to Lean.Json")
 
 
-def from_lean(x: str, typ: str | None = None) -> object:
+def from_lean(x: str) -> object:
     x = x.strip()
-    if typ in _FROM_LEAN_REGISTRY:
-        return _FROM_LEAN_REGISTRY[typ](x)
     if x.startswith("Std.HashMap.ofList"):
         match = re.match(r"^Std\\.HashMap\\.ofList\\s+(\\[.*\\])\\s*$", x)
         if match:
